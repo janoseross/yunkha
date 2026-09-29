@@ -6,6 +6,15 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Yunkha to access your camera for a live preview.",
+          "recordAudioAndroid": false
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true
     },
