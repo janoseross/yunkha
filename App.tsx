@@ -6,7 +6,8 @@ import {
   RTCSessionDescription, RTCView,
 } from 'react-native-webrtc';
 
-import { role, signalingUrl } from './devConfig';
+import { signalingUrl } from './devConfig';
+import type { Role } from './devConfig';
 
 type SignalMessage =
   | { type: 'ready' | 'waiting' | 'peer-left' }
@@ -21,6 +22,25 @@ function releaseStream(stream: MediaStream) {
 }
 
 export default function App() {
+  const [role, setRole] = useState<Role | null>(null);
+
+  return (
+    <View style={styles.container}>
+      <StatusBar style="light" />
+      {role ? (
+        <Session role={role} onLeave={() => setRole(null)} />
+      ) : (
+        <View style={styles.roleChoice}>
+          <Text style={styles.title}>Yunkha</Text>
+          <Button title="Camera" onPress={() => setRole('sender')} />
+          <Button title="Monitor" onPress={() => setRole('receiver')} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isStarting, setIsStarting] = useState(false);
@@ -105,7 +125,7 @@ export default function App() {
       }
     };
     return peer;
-  }, [send]);
+  }, [role, send]);
 
   const offer = useCallback(async (stream: MediaStream) => {
     if (!peerReadyRef.current || peerRef.current) return;
@@ -161,7 +181,7 @@ export default function App() {
       startingRef.current = false;
       if (mounted.current) setIsStarting(false);
     }
-  }, [offer]);
+  }, [offer, role]);
 
   const handleSignal = useCallback(async (message: SignalMessage) => {
     try {
@@ -221,7 +241,7 @@ export default function App() {
       setError(cause instanceof Error ? cause.message : 'Signaling failed');
       stopCall(true, true);
     }
-  }, [createPeer, offer, send, stopCall]);
+  }, [createPeer, offer, role, send, stopCall]);
 
   useEffect(() => {
     mounted.current = true;
@@ -257,15 +277,18 @@ export default function App() {
       subscription.remove();
       stopCall(true, true);
       socketRef.current = null;
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
       socket.close();
     };
-  }, [handleSignal, stopCall]);
+  }, [handleSignal, role, stopCall]);
 
   const preview = role === 'sender' ? localStream : remoteStream;
   return (
-    <View style={styles.container}>
-      <StatusBar style="light" />
-      <Text style={styles.title}>Yunkha · {role}</Text>
+    <View style={styles.session}>
+      <Text style={styles.title}>Yunkha · {role === 'sender' ? 'Camera' : 'Monitor'}</Text>
       <Text style={styles.status}>{status}</Text>
       <View style={styles.preview}>
         {preview ? (
@@ -285,12 +308,17 @@ export default function App() {
           <Button title="Stop Camera" onPress={() => stopCall(true, true)} disabled={!isStarting && !localStream} />
         </View>
       )}
+      <View style={styles.leaveControl}>
+        <Button title="Leave" onPress={onLeave} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111', paddingTop: 48, paddingBottom: 32 },
+  session: { flex: 1 },
+  roleChoice: { flex: 1, justifyContent: 'center', gap: 16 },
   title: { color: '#fff', textAlign: 'center', fontSize: 20 },
   status: { color: '#bbb', textAlign: 'center', marginVertical: 12 },
   preview: { flex: 1, backgroundColor: '#222', justifyContent: 'center' },
@@ -298,4 +326,5 @@ const styles = StyleSheet.create({
   message: { color: '#fff', textAlign: 'center' },
   error: { color: '#ff8787', textAlign: 'center', padding: 12 },
   controls: { flexDirection: 'row', justifyContent: 'space-evenly', paddingTop: 16 },
+  leaveControl: { paddingTop: 16 },
 });
