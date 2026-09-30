@@ -1,97 +1,103 @@
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, AppState, Button, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Button, StyleSheet, Text, View } from 'react-native';
+import { MediaStream, mediaDevices, RTCView } from 'react-native-webrtc';
+
+function releaseStream(stream: MediaStream) {
+  stream.getTracks().forEach((track) => track.stop());
+  stream.release();
+}
 
 export default function App() {
-  const [permission, requestPermission, getPermission] = useCameraPermissions({ get: false });
-  const [isLoading, setIsLoading] = useState(true);
-  const [isActive, setIsActive] = useState(AppState.currentState === 'active');
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const startingRef = useRef(false);
+  const requestId = useRef(0);
+  const mounted = useRef(true);
+
+  const stopCamera = useCallback(() => {
+    requestId.current += 1;
+    if (streamRef.current) {
+      releaseStream(streamRef.current);
+      streamRef.current = null;
+    }
+    if (mounted.current) {
+      setStream(null);
+    }
+  }, []);
 
   useEffect(() => {
-    void getPermission()
-      .catch(() => setError('Unable to check camera permission. Restart Yunkha to try again.'))
-      .finally(() => setIsLoading(false));
-
+    mounted.current = true;
     const subscription = AppState.addEventListener('change', (state) => {
-      setIsActive(state === 'active');
-      if (state === 'active') {
-        void getPermission().catch(() => setError('Unable to check camera permission.'));
-      }
+      if (state !== 'active') stopCamera();
     });
 
-    return () => subscription.remove();
-  }, [getPermission]);
+    return () => {
+      mounted.current = false;
+      subscription.remove();
+      stopCamera();
+    };
+  }, [stopCamera]);
 
-  async function allowCamera() {
-    setIsLoading(true);
+  async function startCamera() {
+    if (startingRef.current || streamRef.current) return;
+
+    startingRef.current = true;
+    setIsStarting(true);
     setError(null);
-    try {
-      const response = await requestPermission();
-      if (!response.granted && !response.canAskAgain) {
-        setError('Camera access is blocked by your phone. Enable camera permission for Expo Go in Settings.');
-      }
-    } catch {
-      setError('Unable to request camera permission. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  }
+    const currentRequest = ++requestId.current;
 
-  if (isLoading || error || !permission?.granted) {
-    return (
-      <View style={styles.messageContainer}>
-        <StatusBar style="light" />
-        {isLoading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <>
-            <Text style={styles.message}>
-              {error ?? 'Allow camera access to see the live preview.'}
-            </Text>
-            {!permission?.granted && (
-              <Button title="Allow camera" onPress={allowCamera} />
-            )}
-          </>
-        )}
-      </View>
-    );
+    try {
+      const localStream = await mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: 'environment' },
+      });
+
+      if (!mounted.current || currentRequest !== requestId.current) {
+        releaseStream(localStream);
+        return;
+      }
+
+      streamRef.current = localStream;
+      setStream(localStream);
+    } catch (cause) {
+      if (mounted.current && currentRequest === requestId.current) {
+        setError(cause instanceof Error ? cause.message : 'Could not start the camera.');
+      }
+    } finally {
+      startingRef.current = false;
+      if (mounted.current) setIsStarting(false);
+    }
   }
 
   return (
     <View style={styles.container}>
-      <StatusBar hidden />
-      {isActive && (
-        <CameraView
-          style={styles.camera}
-          facing="back"
-          onMountError={() => setError('Unable to start the camera. Restart Yunkha to try again.')}
-        />
-      )}
+      <StatusBar style="light" />
+      <Text style={styles.title}>Yunkha WebRTC camera</Text>
+      <View style={styles.preview}>
+        {stream ? (
+          <RTCView style={styles.video} streamURL={stream.toURL()} objectFit="cover" />
+        ) : (
+          <Text style={styles.message}>Camera stopped</Text>
+        )}
+      </View>
+      {error && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
+      <View style={styles.controls}>
+        <Button title="Start Camera" onPress={startCamera} disabled={isStarting || !!stream} />
+        <Button title="Stop Camera" onPress={stopCamera} disabled={!isStarting && !stream} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#111',
-  },
-  camera: {
-    flex: 1,
-  },
-  messageContainer: {
-    flex: 1,
-    backgroundColor: '#111',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-    gap: 16,
-  },
-  message: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#111', paddingTop: 48, paddingBottom: 32 },
+  title: { color: '#fff', textAlign: 'center', fontSize: 20, marginBottom: 16 },
+  preview: { flex: 1, backgroundColor: '#222', justifyContent: 'center' },
+  video: { flex: 1 },
+  message: { color: '#fff', textAlign: 'center' },
+  error: { color: '#ff8787', textAlign: 'center', padding: 12 },
+  controls: { flexDirection: 'row', justifyContent: 'space-evenly', paddingTop: 16 },
 });
