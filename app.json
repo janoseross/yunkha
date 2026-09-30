@@ -11,7 +11,11 @@
       "@config-plugins/react-native-webrtc"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.eross.yunkha",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "dev.eross.yunkha",
