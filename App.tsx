@@ -93,7 +93,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   }, [send]);
 
   const createPeer = useCallback((callId: string) => {
-    const peer = new RTCPeerConnection({ iceServers: [] });
+    const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     peerRef.current = peer;
     callIdRef.current = callId;
     pendingLocalCandidates.current = [];
