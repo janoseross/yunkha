@@ -3,6 +3,17 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal"
-    }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SIGNALING_URL": "ws://35.227.96.42:8787",
+        "YUNKHA_PREVIEW_CLEARTEXT": "true"
+      }
+    },
+    "production": {}
   }
 }
