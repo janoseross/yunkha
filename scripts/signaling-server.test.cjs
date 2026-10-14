@@ -49,7 +49,7 @@ test('rooms isolate signaling and clean up when peers leave', async () => {
 
     cameraA.send({ type: 'create-room' });
     const codeA = (await cameraA.next('room-created')).code;
-    assert.match(codeA, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/);
+    assert.match(codeA, /^[ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/);
     await cameraA.next('waiting');
     cameraB.send({ type: 'create-room' });
     const codeB = (await cameraB.next('room-created')).code;
@@ -67,7 +67,9 @@ test('rooms isolate signaling and clean up when peers leave', async () => {
 
     extra.send({ type: 'join-room', code: codeA });
     assert.equal((await extra.next('room-error')).reason, 'room-full');
-    extra.send({ type: 'join-room', code: 'O0I1' });
+    extra.send({ type: 'join-room', code: 'AB2C' });
+    assert.equal((await extra.next('room-error')).reason, 'invalid-room-code');
+    extra.send({ type: 'join-room', code: 'AIOC' });
     assert.equal((await extra.next('room-error')).reason, 'invalid-room-code');
     const missingCode = ['AAAA', 'BBBB', 'CCCC'].find((code) => code !== codeA && code !== codeB);
     extra.send({ type: 'join-room', code: missingCode });
@@ -90,10 +92,21 @@ test('rooms isolate signaling and clean up when peers leave', async () => {
     monitorA.send({ type: 'leave-room' });
     await cameraA.next('peer-left');
     await cameraA.next('waiting');
+    monitorA.send({ type: 'candidate', callId: 'a1', candidate: { candidate: 'stale' } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(cameraA.messages, []);
     extra.send({ type: 'join-room', code: codeA });
     await extra.next('room-joined');
     await extra.next('ready');
     await cameraA.next('ready');
+    monitorA.send({ type: 'candidate', callId: 'a1', candidate: { candidate: 'stale-after-rejoin' } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(cameraA.messages, []);
+    assert.deepEqual(extra.messages, []);
+    cameraA.send({ type: 'offer', callId: 'a2', sdp: { type: 'offer', sdp: 'new' } });
+    assert.equal((await extra.next('offer')).callId, 'a2');
+    extra.send({ type: 'answer', callId: 'a2', sdp: { type: 'answer', sdp: 'new-answer' } });
+    assert.equal((await cameraA.next('answer')).callId, 'a2');
     extra.socket.close();
     await cameraA.next('peer-left');
     await cameraA.next('waiting');
@@ -101,6 +114,10 @@ test('rooms isolate signaling and clean up when peers leave', async () => {
     await monitorA.next('room-joined');
     await monitorA.next('ready');
     await cameraA.next('ready');
+    cameraA.send({ type: 'offer', callId: 'a3', sdp: { type: 'offer', sdp: 'same-monitor-rejoined' } });
+    assert.equal((await monitorA.next('offer')).callId, 'a3');
+    monitorA.send({ type: 'answer', callId: 'a3', sdp: { type: 'answer', sdp: 'rejoined-answer' } });
+    assert.equal((await cameraA.next('answer')).callId, 'a3');
 
     cameraA.socket.close();
     assert.equal((await monitorA.next('room-ended')).code, codeA);

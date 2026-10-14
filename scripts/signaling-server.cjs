@@ -2,7 +2,7 @@ const { WebSocket, WebSocketServer } = require('ws');
 const { randomInt } = require('node:crypto');
 
 const port = 8787;
-const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const rooms = new Map();
 const clients = new Map();
 const server = new WebSocketServer({ host: '0.0.0.0', port, perMessageDeflate: false });

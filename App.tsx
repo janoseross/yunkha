@@ -1,8 +1,11 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Application from 'expo-application';
 import Constants from 'expo-constants';
+import { useKeepAwake } from 'expo-keep-awake';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Button, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
   MediaStream, mediaDevices, RTCIceCandidate, RTCPeerConnection,
   RTCSessionDescription, RTCView,
@@ -29,10 +32,17 @@ const VIDEO_QUALITY_PRESETS = {
 } as const;
 
 type VideoQuality = keyof typeof VIDEO_QUALITY_PRESETS;
+const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/;
+const LAST_MONITOR_ROOM_KEY = '@yunkha/last-monitor-room';
 
 function releaseStream(stream: MediaStream) {
   stream.getTracks().forEach((track) => track.stop());
   stream.release();
+}
+
+function CameraKeepAwake() {
+  useKeepAwake();
+  return null;
 }
 
 export default function App() {
@@ -42,24 +52,26 @@ export default function App() {
   const buildTimestamp = Constants.expoConfig?.extra?.buildTimestamp;
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="light" />
-      {role ? (
-        <Session role={role} onLeave={() => setRole(null)} />
-      ) : (
-        <>
-          <View style={styles.roleChoice}>
-            <Text style={styles.title}>Yunkha</Text>
-            <Button title="Camera" onPress={() => setRole('sender')} />
-            <Button title="Monitor" onPress={() => setRole('receiver')} />
-          </View>
-          <Text style={styles.buildInfo}>
-            Version {appVersion}{androidBuildNumber ? ` · Android build ${androidBuildNumber}` : ''}{'\n'}
-            Built {typeof buildTimestamp === 'string' ? buildTimestamp : 'unavailable'}
-          </Text>
-        </>
-      )}
-    </View>
+    <SafeAreaProvider>
+      <SafeAreaView edges={['bottom']} style={styles.container}>
+        <StatusBar style="light" />
+        {role ? (
+          <Session role={role} onLeave={() => setRole(null)} />
+        ) : (
+          <>
+            <View style={styles.roleChoice}>
+              <Text style={styles.title}>Yunkha</Text>
+              <Button title="Camera" onPress={() => setRole('sender')} />
+              <Button title="Monitor" onPress={() => setRole('receiver')} />
+            </View>
+            <Text style={styles.buildInfo}>
+              Version {appVersion}{androidBuildNumber ? ` · Android build ${androidBuildNumber}` : ''}{'\n'}
+              Built {typeof buildTimestamp === 'string' ? buildTimestamp : 'unavailable'}
+            </Text>
+          </>
+        )}
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
@@ -80,6 +92,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const socketRef = useRef<WebSocket | null>(null);
   const roomCodeRef = useRef<string | null>(null);
   const pendingJoinRef = useRef<string | null>(null);
+  const roomInputEdited = useRef(false);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
@@ -92,6 +105,17 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const startingRef = useRef(false);
   const mounted = useRef(false);
 
+  useEffect(() => {
+    if (role !== 'receiver') return;
+    let active = true;
+    void AsyncStorage.getItem(LAST_MONITOR_ROOM_KEY).then((savedCode) => {
+      if (active && !roomInputEdited.current && savedCode && ROOM_CODE_PATTERN.test(savedCode)) {
+        setRoomInput(savedCode);
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [role]);
+
   const send = useCallback((message: SignalMessage) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(message));
@@ -100,8 +124,8 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
 
   const connectMonitor = () => {
     const code = roomInput.trim().toUpperCase();
-    if (!/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/.test(code)) {
-      setError('Enter a valid 4-character room code.');
+    if (!ROOM_CODE_PATTERN.test(code)) {
+      setError('Enter a valid 4-letter room code.');
       return;
     }
     pendingJoinRef.current = code;
@@ -284,6 +308,10 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
           pendingJoinRef.current = null;
           roomCodeRef.current = message.code;
           setRoomCode(message.code);
+          setRoomInput(message.code);
+          void AsyncStorage.setItem(LAST_MONITOR_ROOM_KEY, message.code).catch(() => {
+            if (mounted.current) setError('Could not save the room code.');
+          });
           setIsJoining(false);
           setError(null);
           setStatus('Waiting for Camera video');
@@ -292,7 +320,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
           pendingJoinRef.current = null;
           setIsJoining(false);
           const messages: Record<string, string> = {
-            'invalid-room-code': 'Enter a valid 4-character room code.',
+            'invalid-room-code': 'Enter a valid 4-letter room code.',
             'room-not-found': 'Room not found. Check the code and try again.',
             'room-full': 'This room already has a Monitor.',
             'already-in-room': 'Already connected to a room.',
@@ -308,7 +336,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
           roomCodeRef.current = null;
           peerReadyRef.current = false;
           setRoomCode(null);
-          setRoomInput('');
+          setRoomInput(message.code);
           setError(null);
           stopCall(true, false);
           setStatus('Camera ended the room');
@@ -367,6 +395,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
           break;
       }
     } catch (cause) {
+      if (!mounted.current || ('callId' in message && message.callId !== callIdRef.current)) return;
       setError(cause instanceof Error ? cause.message : 'Signaling failed');
       stopCall(true, true);
     }
@@ -431,6 +460,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const qualityLocked = isStarting || !!localStream;
   return (
     <View style={styles.session}>
+      {role === 'sender' && localStream && <CameraKeepAwake />}
       <Text style={styles.title}>Yunkha · {role === 'sender' ? 'Camera' : 'Monitor'}</Text>
       {role === 'sender' && roomCode && (
         <View style={styles.roomCodeBlock}>
@@ -447,11 +477,10 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
             style={styles.roomInput}
             value={roomInput}
             onChangeText={(value) => {
-              setRoomInput(value.toUpperCase().replace(/[^ABCDEFGHJKLMNPQRSTUVWXYZ23456789]/g, '').slice(0, 4));
+              roomInputEdited.current = true;
+              setRoomInput(value.toUpperCase().replace(/[^ABCDEFGHJKLMNPQRSTUVWXYZ]/g, '').slice(0, 4));
               setError(null);
             }}
-            placeholder="AB23"
-            placeholderTextColor="#888"
             autoCapitalize="characters"
             autoCorrect={false}
             keyboardType="default"
