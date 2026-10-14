@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Application from 'expo-application';
 import Constants from 'expo-constants';
+import { useFonts } from 'expo-font';
 import { useKeepAwake } from 'expo-keep-awake';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Button, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -13,6 +15,9 @@ import {
 
 import { signalingUrl } from './devConfig';
 import type { Role } from './devConfig';
+import { colors, tokens, typography } from './src/design-system/tokens';
+
+void SplashScreen.preventAutoHideAsync();
 
 type SignalMessage =
   | { type: 'create-room' | 'leave-room' }
@@ -47,15 +52,36 @@ function CameraKeepAwake() {
 
 export default function App() {
   const [role, setRole] = useState<Role | null>(null);
+  const [showDesignSystem, setShowDesignSystem] = useState(false);
+  const [fontsLoaded, fontError] = useFonts({
+    Inter_400Regular: require('@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf'),
+    Inter_500Medium: require('@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf'),
+    Inter_600SemiBold: require('@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf'),
+    Inter_700Bold: require('@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf'),
+  });
   const appVersion = Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? 'unknown';
   const androidBuildNumber = Platform.OS === 'android' ? Application.nativeBuildVersion : null;
   const buildTimestamp = Constants.expoConfig?.extra?.buildTimestamp;
+
+  useEffect(() => {
+    if (fontsLoaded) void SplashScreen.hideAsync();
+  }, [fontsLoaded]);
+
+  if (fontError) throw fontError;
+  if (!fontsLoaded) return null;
+
+  // The require stays inside the development branch so the showcase is absent from release bundles.
+  const DesignSystemShowcase = __DEV__ && showDesignSystem
+    ? (require('./src/design-system/Showcase').default as typeof import('./src/design-system/Showcase').default)
+    : null;
 
   return (
     <SafeAreaProvider>
       <SafeAreaView edges={['bottom']} style={styles.container}>
         <StatusBar style="light" />
-        {role ? (
+        {DesignSystemShowcase ? (
+          <DesignSystemShowcase onClose={() => setShowDesignSystem(false)} />
+        ) : role ? (
           <Session role={role} onLeave={() => setRole(null)} />
         ) : (
           <>
@@ -64,6 +90,16 @@ export default function App() {
               <Button title="Camera" onPress={() => setRole('sender')} />
               <Button title="Monitor" onPress={() => setRole('receiver')} />
             </View>
+            {__DEV__ && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open Design System Showcase"
+                onPress={() => setShowDesignSystem(true)}
+                style={styles.designSystemEntry}
+              >
+                <Text style={styles.designSystemEntryText}>Design System Showcase</Text>
+              </Pressable>
+            )}
             <Text style={styles.buildInfo}>
               Version {appVersion}{androidBuildNumber ? ` · Android build ${androidBuildNumber}` : ''}{'\n'}
               Built {typeof buildTimestamp === 'string' ? buildTimestamp : 'unavailable'}
@@ -556,11 +592,13 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111', paddingTop: 48, paddingBottom: 32 },
+  container: { flex: 1, backgroundColor: colors.background, paddingTop: 48, paddingBottom: 32 },
   session: { flex: 1 },
   roleChoice: { flex: 1, justifyContent: 'center', gap: 16 },
   buildInfo: { color: '#777', fontSize: 11, textAlign: 'center', paddingHorizontal: 16 },
   title: { color: '#fff', textAlign: 'center', fontSize: 20 },
+  designSystemEntry: { alignSelf: 'center', minHeight: tokens.layout.touchTarget, justifyContent: 'center', paddingHorizontal: tokens.spacing.x4 },
+  designSystemEntryText: { ...typography.label, color: colors.textSecondary, textDecorationLine: 'underline' },
   roomCodeBlock: { alignItems: 'center', paddingTop: 12 },
   roomCodeLabel: { color: '#bbb', fontSize: 16 },
   roomCode: { color: '#fff', fontSize: 40, fontWeight: 'bold', letterSpacing: 8 },

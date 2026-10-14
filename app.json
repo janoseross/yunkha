@@ -6,9 +6,11 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "plugins": [
-      "@config-plugins/react-native-webrtc"
+      "@config-plugins/react-native-webrtc",
+      "expo-font",
+      ["expo-splash-screen", { "backgroundColor": "#16211A" }]
     ],
     "ios": {
       "supportsTablet": true,
