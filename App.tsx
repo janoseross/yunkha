@@ -4,8 +4,21 @@ import { useKeepAwake } from 'expo-keep-awake';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Button, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, BackHandler, Clipboard, Keyboard, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import ArrowLeft from 'lucide-react-native/icons/arrow-left';
+import CameraIcon from 'lucide-react-native/icons/camera';
+import CameraOff from 'lucide-react-native/icons/camera-off';
+import Check from 'lucide-react-native/icons/check';
+import Copy from 'lucide-react-native/icons/copy';
+import Eye from 'lucide-react-native/icons/eye';
+import EyeOff from 'lucide-react-native/icons/eye-off';
+import Maximize2 from 'lucide-react-native/icons/maximize-2';
+import Minimize2 from 'lucide-react-native/icons/minimize-2';
+import MonitorPlay from 'lucide-react-native/icons/monitor-play';
+import Play from 'lucide-react-native/icons/play';
+import RefreshCw from 'lucide-react-native/icons/refresh-cw';
+import Square from 'lucide-react-native/icons/square';
 import {
   MediaStream, mediaDevices, RTCIceCandidate, RTCPeerConnection,
   RTCSessionDescription, RTCView,
@@ -13,7 +26,9 @@ import {
 
 import { signalingUrl } from './devConfig';
 import type { Role } from './devConfig';
-import { colors } from './src/design-system/tokens';
+import { AppText, AppTextInput, Button, Card, IconButton, StatusIndicator } from './src/design-system/components';
+import type { ConnectionStatus } from './src/design-system/components';
+import { colors, tokens } from './src/design-system/tokens';
 import HomeScreen from './src/screens/HomeScreen';
 
 void SplashScreen.preventAutoHideAsync();
@@ -34,6 +49,7 @@ const VIDEO_QUALITY_PRESETS = {
   balanced: { label: 'Balanced', width: 1280, height: 720, frameRate: 15 },
   high: { label: 'High', width: 1920, height: 1080, frameRate: 30 },
 } as const;
+const VIDEO_FRAME_ASPECT_RATIO = 4 / 3;
 
 type VideoQuality = keyof typeof VIDEO_QUALITY_PRESETS;
 const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/;
@@ -73,7 +89,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView edges={isHome ? ['top', 'bottom'] : ['bottom']} style={[styles.container, isHome && styles.homeContainer]}>
+      <SafeAreaView edges={isHome || role ? ['top', 'bottom'] : ['bottom']} style={[styles.container, (isHome || role) && styles.fullBleedContainer]}>
         <StatusBar style="light" />
         {DesignSystemShowcase ? (
           <DesignSystemShowcase onClose={() => setShowDesignSystem(false)} />
@@ -92,6 +108,7 @@ export default function App() {
 }
 
 function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
+  const { width: windowWidth } = useWindowDimensions();
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isStarting, setIsStarting] = useState(false);
@@ -99,11 +116,13 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [roomInput, setRoomInput] = useState('');
   const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
   const [showLocalPreview, setShowLocalPreview] = useState(true);
   const [videoQuality, setVideoQuality] = useState<VideoQuality>('balanced');
   const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [connectionAttempt, setConnectionAttempt] = useState(role === 'sender' ? 1 : 0);
   const socketRef = useRef<WebSocket | null>(null);
   const roomCodeRef = useRef<string | null>(null);
@@ -120,6 +139,19 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const startRequest = useRef(0);
   const startingRef = useRef(false);
   const mounted = useRef(false);
+
+  useEffect(() => {
+    if (role !== 'receiver' || !isFullscreen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setIsFullscreen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [isFullscreen, role]);
+
+  useEffect(() => {
+    if (!roomCode) setIsFullscreen(false);
+  }, [roomCode]);
 
   useEffect(() => {
     if (role !== 'receiver') return;
@@ -316,11 +348,13 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
           if (role !== 'sender') break;
           roomCodeRef.current = message.code;
           setRoomCode(message.code);
+          setCodeCopied(false);
           setError(null);
           setStatus('Waiting for Monitor');
           break;
         case 'room-joined':
           if (role !== 'receiver') break;
+          Keyboard.dismiss();
           pendingJoinRef.current = null;
           roomCodeRef.current = message.code;
           setRoomCode(message.code);
@@ -473,23 +507,116 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   }, [connectionAttempt, handleSignal, role, send, stopCall]);
 
   const preview = role === 'sender' ? localStream : remoteStream;
+  const cameraPreviewMinHeight = Math.max(0, Math.min(windowWidth, tokens.layout.contentMaxWidth) - 2 * tokens.layout.screenPadding) / VIDEO_FRAME_ASPECT_RATIO;
   const qualityLocked = isStarting || !!localStream;
+  const copyRoomCode = () => {
+    if (!roomCode) return;
+    Clipboard.setString(roomCode);
+    setCodeCopied(true);
+  };
+  const statusLower = status.toLowerCase();
+  const connectionStatus: ConnectionStatus = error || !signalingUrl || statusLower.includes('failed')
+    ? 'error'
+    : statusLower.includes('connected:') || statusLower === 'webrtc: connected'
+      ? 'connected'
+      : isStarting || isJoining || statusLower.includes('connecting') || statusLower.includes('creating') || statusLower.includes('joining') || statusLower.includes('starting') || statusLower.includes('answer')
+        ? 'connecting'
+        : statusLower.includes('waiting') || statusLower.includes('ready')
+          ? 'waiting'
+          : 'disconnected';
+
+  const header = (
+    <View style={styles.sessionHeader}>
+      <IconButton icon={ArrowLeft} accessibilityLabel="Return to Home and leave room" onPress={onLeave} />
+      <AppText variant="title" style={styles.headerTitle}>{role === 'sender' ? 'Camera' : 'Monitor'}</AppText>
+      {role === 'sender' ? <CameraIcon size={tokens.icons.size.large} color={colors.textSecondary} /> : <MonitorPlay size={tokens.icons.size.large} color={colors.textSecondary} />}
+    </View>
+  );
+  const videoContent = preview && (role !== 'sender' || showLocalPreview) ? (
+    <RTCView style={styles.video} streamURL={preview.toURL()} objectFit="contain" mirror={role === 'sender' && cameraFacing === 'user'} />
+  ) : (
+    <View style={styles.videoEmpty}>
+      {role === 'sender' && localStream ? <EyeOff size={tokens.icons.size.hero} color={colors.textSecondary} /> : role === 'sender' ? <CameraOff size={tokens.icons.size.hero} color={colors.textSecondary} /> : <MonitorPlay size={tokens.icons.size.hero} color={colors.textSecondary} />}
+      <AppText variant="bodyMedium" style={styles.emptyTitle}>
+        {role === 'sender' ? (localStream ? 'Preview hidden' : 'Camera is off') : roomCode ? 'Waiting for video' : 'No room connected'}
+      </AppText>
+      <AppText variant="caption" tone="textSecondary" style={styles.emptyDescription}>
+        {role === 'sender' ? (localStream ? 'Your video keeps streaming to the Monitor.' : 'Start the camera when you’re ready to stream.') : roomCode ? 'Video will appear when the Camera starts streaming.' : 'Enter a code below to watch live video.'}
+      </AppText>
+    </View>
+  );
+
+  if (role === 'receiver' && roomCode) {
+    return (
+      <View style={[styles.joinedSession, isFullscreen && styles.fullscreenSession]}>
+        <StatusBar hidden={isFullscreen} style="light" />
+        {isFullscreen ? (
+          <>
+            <View style={styles.fullscreenToolbar}>
+              <IconButton icon={Minimize2} accessibilityLabel="Exit fullscreen" onPress={() => setIsFullscreen(false)} variant="surface" />
+            </View>
+            <View style={[styles.videoFrame, styles.videoFill, styles.fullscreenVideo]}>{videoContent}</View>
+          </>
+        ) : (
+          <>
+            {header}
+            <View style={[styles.videoFrame, styles.videoFill]}>{videoContent}</View>
+            <View style={styles.roomInfo}>
+              <View style={styles.roomInfoTop}>
+                <AppText variant="metadata" tone="textSecondary">ROOM</AppText>
+                <AppText variant="title" style={styles.joinedCode}>{roomCode}</AppText>
+                <IconButton icon={Maximize2} accessibilityLabel="View video fullscreen" onPress={() => setIsFullscreen(true)} />
+                <Button label="Leave" variant="secondary" onPress={onLeave} />
+              </View>
+              <StatusIndicator status={connectionStatus} label={connectionStatus === 'connected' ? 'Receiving video' : status} />
+            </View>
+            {(error || !signalingUrl) && (
+              <Card style={styles.errorCard}>
+                <AppText tone="error" accessibilityRole="alert">
+                  {error || 'Set EXPO_PUBLIC_SIGNALING_URL to the signaling WebSocket URL.'}
+                </AppText>
+              </Card>
+            )}
+          </>
+        )}
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.session}>
+    <ScrollView
+      style={styles.session}
+      contentContainerStyle={styles.sessionContent}
+      automaticallyAdjustKeyboardInsets
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
       {role === 'sender' && localStream && <CameraKeepAwake />}
-      <Text style={styles.title}>Yunkha · {role === 'sender' ? 'Camera' : 'Monitor'}</Text>
-      {role === 'sender' && roomCode && (
-        <View style={styles.roomCodeBlock}>
-          <Text style={styles.roomCodeLabel}>Room code</Text>
-          <Text style={styles.roomCode}>{roomCode}</Text>
+      {header}
+
+      <View style={[styles.videoFrame, role === 'sender' ? [styles.cameraVideo, { minHeight: cameraPreviewMinHeight }] : styles.videoStandard]}>{videoContent}</View>
+
+      {role === 'sender' && (
+        <View style={styles.roomInfo}>
+          <View style={styles.roomInfoTop}>
+            <AppText variant="metadata" tone="textSecondary">ROOM</AppText>
+            <AppText variant="heading" style={styles.roomCode} adjustsFontSizeToFit minimumFontScale={0.7} numberOfLines={1} accessibilityLabel={roomCode ? `Room code ${roomCode.split('').join(' ')}` : 'Room code pending'}>
+              {roomCode ?? '····'}
+            </AppText>
+            <Button label={codeCopied ? 'Copied' : 'Copy'} icon={codeCopied ? Check : Copy} variant="secondary" onPress={copyRoomCode} disabled={!roomCode} />
+          </View>
+          <StatusIndicator status={connectionStatus} label={connectionStatus === 'connected' ? 'Connected' : status} />
         </View>
       )}
-      <Text style={styles.status}>{status}</Text>
-      {role === 'receiver' && !roomCode ? (
-        <View style={styles.roomEntry}>
-          <Text style={styles.roomEntryLabel}>Enter room code</Text>
-          <TextInput
-            accessibilityLabel="Room code"
+
+      {role === 'receiver' && !roomCode && (
+        <Card style={styles.joinCard}>
+          <AppText variant="title">Join a room</AppText>
+          {(isJoining || status !== 'Enter a room code') && <StatusIndicator status={connectionStatus} label={status} />}
+          <AppTextInput
+            label="Room code"
+            accessibilityLabel="Four-letter room code"
+            error={error || (!signalingUrl ? 'Set EXPO_PUBLIC_SIGNALING_URL to the signaling WebSocket URL.' : undefined)}
             style={styles.roomInput}
             value={roomInput}
             onChangeText={(value) => {
@@ -501,28 +628,33 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
             autoCorrect={false}
             keyboardType="default"
             maxLength={4}
+            multiline={false}
+            scrollEnabled={false}
+            numberOfLines={1}
+            textAlignVertical="center"
+            placeholder="ABCD"
+            returnKeyType="done"
+            onSubmitEditing={connectMonitor}
+            editable={!isJoining}
           />
-          <Button title="Connect" onPress={connectMonitor} disabled={isJoining || roomInput.length !== 4 || !signalingUrl} />
-        </View>
-      ) : (
-        <View style={styles.preview}>
-          {preview && (role !== 'sender' || showLocalPreview) ? (
-            <RTCView style={styles.video} streamURL={preview.toURL()} objectFit="cover" mirror={role === 'sender' && cameraFacing === 'user'} />
-          ) : (
-            <Text style={styles.message}>
-              {role === 'sender' ? (localStream ? 'Local preview off · Camera still streaming' : 'Camera stopped') : 'Waiting for video'}
-            </Text>
-          )}
-        </View>
+          <Button label="Join room" icon={Play} onPress={connectMonitor} loading={isJoining} disabled={roomInput.length !== 4 || !signalingUrl} fullWidth />
+        </Card>
       )}
-      {(error || !signalingUrl) && (
-        <Text style={styles.error} accessibilityRole="alert">
-          {error || 'Set EXPO_PUBLIC_SIGNALING_URL to the signaling WebSocket URL.'}
-        </Text>
+
+      {(error || !signalingUrl) && role === 'sender' && (
+        <Card style={styles.errorCard}>
+          <AppText tone="error" accessibilityRole="alert">
+            {error || 'Set EXPO_PUBLIC_SIGNALING_URL to the signaling WebSocket URL.'}
+          </AppText>
+        </Card>
       )}
+
       {role === 'sender' && (
-        <View style={styles.qualitySection}>
-          <Text style={styles.qualityLabel}>Video Quality{qualityLocked ? ' · Stop Camera to change' : ''}</Text>
+        <View style={styles.settingsSection}>
+          <View style={styles.settingsHeading}>
+            <AppText variant="label">Video quality</AppText>
+            {qualityLocked && <AppText variant="caption" tone="textSecondary">Stop camera to change</AppText>}
+          </View>
           <View style={styles.qualityOptions}>
             {(['low', 'balanced', 'high'] as const).map((quality) => {
               const preset = VIDEO_QUALITY_PRESETS[quality];
@@ -531,15 +663,16 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
                 <Pressable
                   key={quality}
                   accessibilityRole="radio"
+                  accessibilityLabel={`${preset.label}, ${preset.height}p, ${preset.frameRate} frames per second`}
                   accessibilityState={{ checked: selected, disabled: qualityLocked }}
                   disabled={qualityLocked}
                   onPress={() => {
                     if (!startingRef.current && !localStreamRef.current) setVideoQuality(quality);
                   }}
-                  style={[styles.qualityOption, selected && styles.qualityOptionSelected, qualityLocked && styles.qualityOptionDisabled]}
+                  style={({ pressed }) => [styles.qualityOption, selected && styles.qualityOptionSelected, pressed && !qualityLocked && styles.qualityOptionPressed, qualityLocked && styles.qualityOptionDisabled]}
                 >
-                  <Text style={styles.qualityOptionLabel}>{preset.label}</Text>
-                  <Text style={styles.qualityOptionDetail}>{preset.height}p / {preset.frameRate} fps</Text>
+                  <AppText variant="caption" style={styles.qualityOptionLabel}>{preset.label}</AppText>
+                  <AppText variant="metadata" tone="textSecondary" style={styles.qualityOptionDetail}>{preset.height}p / {preset.frameRate} fps</AppText>
                 </Pressable>
               );
             })}
@@ -547,55 +680,121 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
         </View>
       )}
       {role === 'sender' && (
-        <View style={styles.controls}>
-          <Button title="Start Camera" onPress={startCamera} disabled={isStarting || !!localStream} />
-          <Button title="Stop Camera" onPress={() => stopCall(true, true)} disabled={!isStarting && !localStream} />
-        </View>
+        <Button
+          label={localStream ? 'Stop camera' : 'Start camera'}
+          icon={localStream ? Square : Play}
+          variant={localStream ? 'destructive' : 'primary'}
+          onPress={localStream ? () => stopCall(true, true) : startCamera}
+          loading={isStarting}
+          fullWidth
+        />
       )}
       {role === 'sender' && (
-        <View style={styles.previewControl}>
+        <View style={styles.utilityActions}>
           <Button
-            title={isSwitchingCamera ? 'Switching Camera…' : cameraFacing === 'environment' ? 'Use Front Camera' : 'Use Rear Camera'}
+            label={isSwitchingCamera ? 'Switching…' : cameraFacing === 'environment' ? 'Rear → Front' : 'Front → Rear'}
+            accessibilityLabel={cameraFacing === 'environment' ? 'Rear camera active. Switch to front camera' : 'Front camera active. Switch to rear camera'}
+            icon={RefreshCw}
+            variant="secondary"
             onPress={switchCamera}
             disabled={isStarting || isSwitchingCamera}
+            style={styles.utilityButton}
           />
           {!!localStream && (
-            <Button title={showLocalPreview ? 'Hide Preview' : 'Show Preview'} onPress={() => setShowLocalPreview((visible) => !visible)} />
+            <Button label={showLocalPreview ? 'Hide preview' : 'Show preview'} icon={showLocalPreview ? EyeOff : Eye} variant="secondary" onPress={() => setShowLocalPreview((visible) => !visible)} style={styles.utilityButton} />
           )}
         </View>
       )}
-      <View style={styles.leaveControl}>
-        <Button title="Leave" onPress={onLeave} />
-      </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, paddingTop: 48, paddingBottom: 32 },
-  homeContainer: { paddingTop: 0, paddingBottom: 0 },
+  fullBleedContainer: { paddingTop: 0, paddingBottom: 0 },
   session: { flex: 1 },
-  title: { color: '#fff', textAlign: 'center', fontSize: 20 },
-  roomCodeBlock: { alignItems: 'center', paddingTop: 12 },
-  roomCodeLabel: { color: '#bbb', fontSize: 16 },
-  roomCode: { color: '#fff', fontSize: 40, fontWeight: 'bold', letterSpacing: 8 },
-  status: { color: '#bbb', textAlign: 'center', marginVertical: 12 },
-  roomEntry: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
-  roomEntryLabel: { color: '#fff', fontSize: 16 },
-  roomInput: { width: 240, borderColor: '#888', borderWidth: 1, borderRadius: 8, color: '#fff', fontSize: 28, letterSpacing: 6, textAlign: 'center', padding: 12 },
-  preview: { flex: 1, backgroundColor: '#222', justifyContent: 'center' },
+  joinedSession: {
+    flex: 1,
+    paddingHorizontal: tokens.layout.screenPadding,
+    paddingTop: tokens.spacing.x2,
+    paddingBottom: tokens.spacing.x4,
+    gap: tokens.spacing.x3,
+  },
+  fullscreenSession: { paddingHorizontal: tokens.spacing.none, paddingTop: tokens.spacing.none, paddingBottom: tokens.spacing.none, gap: tokens.spacing.none },
+  fullscreenToolbar: { minHeight: tokens.layout.touchTarget, alignItems: 'flex-end', justifyContent: 'center', paddingHorizontal: tokens.layout.screenPadding },
+  sessionContent: {
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: tokens.layout.contentMaxWidth,
+    alignSelf: 'center',
+    paddingHorizontal: tokens.layout.screenPadding,
+    paddingTop: tokens.spacing.x2,
+    paddingBottom: tokens.spacing.x4,
+    gap: tokens.spacing.x3,
+  },
+  sessionHeader: { flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.x3 },
+  headerTitle: { flex: 1 },
+  roomInfo: {
+    gap: tokens.spacing.x1,
+    paddingHorizontal: tokens.spacing.x3,
+    paddingVertical: tokens.spacing.x2,
+    borderRadius: tokens.radii.medium,
+    borderWidth: tokens.borderWidths.hairline,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  roomInfoTop: { flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.x2 },
+  roomCode: { flex: 1, minWidth: 0, letterSpacing: tokens.spacing.x1, color: colors.text },
+  joinCard: { gap: tokens.spacing.x2 },
+  roomInput: {
+    height: tokens.layout.inputMinHeight,
+    minHeight: tokens.layout.inputMinHeight,
+    paddingVertical: tokens.spacing.none,
+    fontSize: tokens.typography.heading.fontSize,
+    lineHeight: tokens.typography.heading.lineHeight,
+    includeFontPadding: false,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    letterSpacing: tokens.spacing.x2,
+  },
+  joinedCode: { flex: 1, letterSpacing: tokens.spacing.x1 },
+  errorCard: { borderColor: colors.error },
+  videoFrame: {
+    width: '100%',
+    borderRadius: tokens.radii.large,
+    overflow: 'hidden',
+    backgroundColor: colors.videoViewport,
+    borderWidth: tokens.borderWidths.hairline,
+    borderColor: colors.border,
+  },
+  videoStandard: { aspectRatio: VIDEO_FRAME_ASPECT_RATIO },
+  cameraVideo: { flexGrow: 1 },
+  videoFill: { flex: 1 },
+  fullscreenVideo: { borderRadius: tokens.radii.none, borderWidth: tokens.borderWidths.none },
   video: { flex: 1 },
-  message: { color: '#fff', textAlign: 'center' },
-  error: { color: '#ff8787', textAlign: 'center', padding: 12 },
-  qualitySection: { paddingHorizontal: 12, paddingTop: 8 },
-  qualityLabel: { color: '#bbb', textAlign: 'center', marginBottom: 8 },
-  qualityOptions: { flexDirection: 'row', gap: 8 },
-  qualityOption: { flex: 1, alignItems: 'center', backgroundColor: '#222', borderColor: '#555', borderWidth: 1, borderRadius: 8, paddingVertical: 8 },
-  qualityOptionSelected: { borderColor: '#fff', backgroundColor: '#333' },
-  qualityOptionDisabled: { opacity: 0.6 },
-  qualityOptionLabel: { color: '#fff', fontSize: 14 },
-  qualityOptionDetail: { color: '#bbb', fontSize: 11 },
-  controls: { flexDirection: 'row', justifyContent: 'space-evenly', paddingTop: 16 },
-  previewControl: { paddingTop: 8, gap: 8 },
-  leaveControl: { paddingTop: 16 },
+  videoEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: tokens.spacing.x4, gap: tokens.spacing.x2 },
+  emptyTitle: { textAlign: 'center' },
+  emptyDescription: { textAlign: 'center' },
+  settingsSection: { gap: tokens.spacing.x2 },
+  settingsHeading: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: tokens.spacing.x2 },
+  qualityOptions: { flexDirection: 'row', gap: tokens.spacing.x2 },
+  qualityOption: {
+    flex: 1,
+    minHeight: tokens.layout.touchTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.border,
+    borderWidth: tokens.borderWidths.hairline,
+    borderRadius: tokens.radii.medium,
+    paddingHorizontal: tokens.spacing.x1,
+    paddingVertical: tokens.spacing.x1,
+  },
+  qualityOptionSelected: { borderColor: colors.borderFocus, backgroundColor: colors.primaryPressed },
+  qualityOptionPressed: { backgroundColor: colors.secondaryPressed },
+  qualityOptionDisabled: { opacity: tokens.layout.disabledOpacity },
+  qualityOptionLabel: { textAlign: 'center' },
+  qualityOptionDetail: { textAlign: 'center' },
+  utilityActions: { flexDirection: 'row', gap: tokens.spacing.x2 },
+  utilityButton: { flex: 1, paddingHorizontal: tokens.spacing.x1 },
 });

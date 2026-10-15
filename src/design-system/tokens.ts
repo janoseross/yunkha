@@ -2,6 +2,7 @@
 export const primitives = {
   color: {
     ink: '#16211A',
+    charcoal: '#080D0B',
     pine: '#223329',
     pineRaised: '#2B4133',
     forest: '#4F785B',
@@ -37,6 +38,7 @@ export const primitives = {
 
 export const colors = {
   background: primitives.color.ink,
+  videoViewport: primitives.color.charcoal,
   surface: primitives.color.pine,
   surfaceElevated: primitives.color.pineRaised,
   primary: primitives.color.forest,
