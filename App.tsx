@@ -1,12 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Application from 'expo-application';
-import Constants from 'expo-constants';
 import { useFonts } from 'expo-font';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Button, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, Button, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
   MediaStream, mediaDevices, RTCIceCandidate, RTCPeerConnection,
@@ -15,7 +13,8 @@ import {
 
 import { signalingUrl } from './devConfig';
 import type { Role } from './devConfig';
-import { colors, tokens, typography } from './src/design-system/tokens';
+import { colors } from './src/design-system/tokens';
+import HomeScreen from './src/screens/HomeScreen';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -59,10 +58,6 @@ export default function App() {
     Inter_600SemiBold: require('@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf'),
     Inter_700Bold: require('@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf'),
   });
-  const appVersion = Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? 'unknown';
-  const androidBuildNumber = Platform.OS === 'android' ? Application.nativeBuildVersion : null;
-  const buildTimestamp = Constants.expoConfig?.extra?.buildTimestamp;
-
   useEffect(() => {
     if (fontsLoaded) void SplashScreen.hideAsync();
   }, [fontsLoaded]);
@@ -74,37 +69,22 @@ export default function App() {
   const DesignSystemShowcase = __DEV__ && showDesignSystem
     ? (require('./src/design-system/Showcase').default as typeof import('./src/design-system/Showcase').default)
     : null;
+  const isHome = !role && !DesignSystemShowcase;
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView edges={['bottom']} style={styles.container}>
+      <SafeAreaView edges={isHome ? ['top', 'bottom'] : ['bottom']} style={[styles.container, isHome && styles.homeContainer]}>
         <StatusBar style="light" />
         {DesignSystemShowcase ? (
           <DesignSystemShowcase onClose={() => setShowDesignSystem(false)} />
         ) : role ? (
           <Session role={role} onLeave={() => setRole(null)} />
         ) : (
-          <>
-            <View style={styles.roleChoice}>
-              <Text style={styles.title}>Yunkha</Text>
-              <Button title="Camera" onPress={() => setRole('sender')} />
-              <Button title="Monitor" onPress={() => setRole('receiver')} />
-            </View>
-            {__DEV__ && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open Design System Showcase"
-                onPress={() => setShowDesignSystem(true)}
-                style={styles.designSystemEntry}
-              >
-                <Text style={styles.designSystemEntryText}>Design System Showcase</Text>
-              </Pressable>
-            )}
-            <Text style={styles.buildInfo}>
-              Version {appVersion}{androidBuildNumber ? ` · Android build ${androidBuildNumber}` : ''}{'\n'}
-              Built {typeof buildTimestamp === 'string' ? buildTimestamp : 'unavailable'}
-            </Text>
-          </>
+          <HomeScreen
+            onCamera={() => setRole('sender')}
+            onMonitor={() => setRole('receiver')}
+            onShowcase={() => setShowDesignSystem(true)}
+          />
         )}
       </SafeAreaView>
     </SafeAreaProvider>
@@ -593,12 +573,9 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, paddingTop: 48, paddingBottom: 32 },
+  homeContainer: { paddingTop: 0, paddingBottom: 0 },
   session: { flex: 1 },
-  roleChoice: { flex: 1, justifyContent: 'center', gap: 16 },
-  buildInfo: { color: '#777', fontSize: 11, textAlign: 'center', paddingHorizontal: 16 },
   title: { color: '#fff', textAlign: 'center', fontSize: 20 },
-  designSystemEntry: { alignSelf: 'center', minHeight: tokens.layout.touchTarget, justifyContent: 'center', paddingHorizontal: tokens.spacing.x4 },
-  designSystemEntryText: { ...typography.label, color: colors.textSecondary, textDecorationLine: 'underline' },
   roomCodeBlock: { alignItems: 'center', paddingTop: 12 },
   roomCodeLabel: { color: '#bbb', fontSize: 16 },
   roomCode: { color: '#fff', fontSize: 40, fontWeight: 'bold', letterSpacing: 8 },

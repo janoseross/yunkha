@@ -83,6 +83,7 @@ export const layout = {
   touchTarget: 48,
   contentMaxWidth: 600,
   disabledOpacity: 0.5,
+  pressedScale: 0.98,
   swatchMinWidth: 150,
 } as const;
 

@@ -34,4 +34,6 @@ Inter Regular, Medium, SemiBold, and Bold load before the app renders. `componen
 - `AppTextInput`: `label`, optional `hint` or `error`, and standard React Native text input props.
 - `StatusIndicator`: `status` (`connected`, `connecting`, `waiting`, `disconnected`, `error`) and optional label.
 
-In a development build, open **Design System Showcase** from the initial role selection screen. The scrollable preview contains color swatches, token scales, and interactive component examples. Its entry and rendering are guarded by `__DEV__`, so it is unavailable in production. Home, Camera, and Monitor retain their existing layouts for the next redesign stages.
+In a development build, open **Design System Showcase** from the Home screen. The scrollable preview contains color swatches, token scales, and interactive component examples. Its entry and rendering are guarded by `__DEV__`, so it is unavailable in production.
+
+The Home screen uses the design system for Camera and Monitor role cards. Camera and Monitor session screens keep their existing layouts pending their redesign.
