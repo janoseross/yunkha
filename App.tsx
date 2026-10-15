@@ -4,7 +4,7 @@ import { useKeepAwake } from 'expo-keep-awake';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, BackHandler, Clipboard, Keyboard, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { AppState, BackHandler, Clipboard, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import CameraIcon from 'lucide-react-native/icons/camera';
@@ -122,6 +122,8 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [isRoomInputFocused, setIsRoomInputFocused] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [connectionAttempt, setConnectionAttempt] = useState(role === 'sender' ? 1 : 0);
   const socketRef = useRef<WebSocket | null>(null);
@@ -139,6 +141,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const startRequest = useRef(0);
   const startingRef = useRef(false);
   const mounted = useRef(false);
+  const sessionScrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     if (role !== 'receiver' || !isFullscreen) return;
@@ -152,6 +155,25 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   useEffect(() => {
     if (!roomCode) setIsFullscreen(false);
   }, [roomCode]);
+
+  useEffect(() => {
+    if (role !== 'receiver') return;
+    const show = Keyboard.addListener('keyboardDidShow', () => setIsKeyboardVisible(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+      setIsRoomInputFocused(false);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, [role]);
+
+  useEffect(() => {
+    if (!isKeyboardVisible || role !== 'receiver' || roomCode) return;
+    const frame = requestAnimationFrame(() => sessionScrollRef.current?.scrollToEnd({ animated: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [isKeyboardVisible, role, roomCode]);
 
   useEffect(() => {
     if (role !== 'receiver') return;
@@ -176,6 +198,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
       setError('Enter a valid 4-letter room code.');
       return;
     }
+    Keyboard.dismiss();
     pendingJoinRef.current = code;
     setError(null);
     setIsJoining(true);
@@ -507,6 +530,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   }, [connectionAttempt, handleSignal, role, send, stopCall]);
 
   const preview = role === 'sender' ? localStream : remoteStream;
+  const isEditingRoom = role === 'receiver' && !roomCode && (isRoomInputFocused || isKeyboardVisible);
   const cameraPreviewMinHeight = Math.max(0, Math.min(windowWidth, tokens.layout.contentMaxWidth) - 2 * tokens.layout.screenPadding) / VIDEO_FRAME_ASPECT_RATIO;
   const qualityLocked = isStarting || !!localStream;
   const copyRoomCode = () => {
@@ -583,18 +607,24 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     );
   }
 
-  return (
+  const sessionScreen = (
     <ScrollView
+      ref={sessionScrollRef}
       style={styles.session}
       contentContainerStyle={styles.sessionContent}
-      automaticallyAdjustKeyboardInsets
+      keyboardDismissMode="on-drag"
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
+      onContentSizeChange={() => {
+        if (isEditingRoom) sessionScrollRef.current?.scrollToEnd({ animated: true });
+      }}
     >
       {role === 'sender' && localStream && <CameraKeepAwake />}
       {header}
 
-      <View style={[styles.videoFrame, role === 'sender' ? [styles.cameraVideo, { minHeight: cameraPreviewMinHeight }] : styles.videoStandard]}>{videoContent}</View>
+      {!isEditingRoom && (
+        <View style={[styles.videoFrame, role === 'sender' ? [styles.cameraVideo, { minHeight: cameraPreviewMinHeight }] : styles.videoStandard]}>{videoContent}</View>
+      )}
 
       {role === 'sender' && (
         <View style={styles.roomInfo}>
@@ -624,6 +654,8 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
               setRoomInput(value.toUpperCase().replace(/[^ABCDEFGHJKLMNPQRSTUVWXYZ]/g, '').slice(0, 4));
               setError(null);
             }}
+            onFocus={() => setIsRoomInputFocused(true)}
+            onBlur={() => setIsRoomInputFocused(false)}
             autoCapitalize="characters"
             autoCorrect={false}
             keyboardType="default"
@@ -707,6 +739,11 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
       )}
     </ScrollView>
   );
+  return role === 'receiver' ? (
+    <KeyboardAvoidingView style={styles.session} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {sessionScreen}
+    </KeyboardAvoidingView>
+  ) : sessionScreen;
 }
 
 const styles = StyleSheet.create({
