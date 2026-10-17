@@ -4,8 +4,7 @@ import type { LucideIcon } from 'lucide-react-native';
 import ArrowUpRight from 'lucide-react-native/icons/arrow-up-right';
 import Camera from 'lucide-react-native/icons/camera';
 import MonitorPlay from 'lucide-react-native/icons/monitor-play';
-import Video from 'lucide-react-native/icons/video';
-import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AppText, Card } from '../design-system/components';
 import { colors, tokens } from '../design-system/tokens';
@@ -70,10 +69,7 @@ export default function HomeScreen({ onCamera, onMonitor, onShowcase }: {
       <View style={styles.main}>
         <View style={styles.intro}>
           <View style={styles.brandHeading}>
-            <View style={styles.brandMark}>
-              <Video size={tokens.icons.size.hero} strokeWidth={tokens.icons.stroke.regular} color={colors.text} />
-              <View style={styles.liveDot} />
-            </View>
+            <Image source={require('../../assets/yunkha-mark.png')} style={styles.brandMark} resizeMode="contain" accessible={false} />
             <View style={styles.brandName}>
               <AppText variant="metadata" tone="success">DIRECT VIDEO MONITORING</AppText>
               <AppText variant="display">Yunkha</AppText>
@@ -129,20 +125,6 @@ const styles = StyleSheet.create({
     width: tokens.spacing.x12 + tokens.spacing.x4,
     height: tokens.spacing.x12 + tokens.spacing.x4,
     borderRadius: tokens.radii.large,
-    backgroundColor: colors.surfaceElevated,
-    borderColor: colors.border,
-    borderWidth: tokens.borderWidths.hairline,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  liveDot: {
-    position: 'absolute',
-    top: tokens.spacing.x2,
-    right: tokens.spacing.x2,
-    width: tokens.spacing.x2,
-    height: tokens.spacing.x2,
-    borderRadius: tokens.radii.pill,
-    backgroundColor: colors.success,
   },
   roles: { gap: tokens.spacing.x3 },
   rolePressable: { borderRadius: tokens.radii.large },

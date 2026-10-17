@@ -551,7 +551,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
 
   const header = (
     <View style={styles.sessionHeader}>
-      <IconButton icon={ArrowLeft} accessibilityLabel="Return to Home and leave room" onPress={onLeave} />
+      <IconButton icon={ArrowLeft} accessibilityLabel={roomCode ? 'Leave room and return Home' : 'Return Home'} onPress={onLeave} />
       <AppText variant="title" style={styles.headerTitle}>{role === 'sender' ? 'Camera' : 'Monitor'}</AppText>
       {role === 'sender' ? <CameraIcon size={tokens.icons.size.large} color={colors.textSecondary} /> : <MonitorPlay size={tokens.icons.size.large} color={colors.textSecondary} />}
     </View>
@@ -633,7 +633,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
             <AppText variant="heading" style={styles.roomCode} adjustsFontSizeToFit minimumFontScale={0.7} numberOfLines={1} accessibilityLabel={roomCode ? `Room code ${roomCode.split('').join(' ')}` : 'Room code pending'}>
               {roomCode ?? '····'}
             </AppText>
-            <Button label={codeCopied ? 'Copied' : 'Copy'} icon={codeCopied ? Check : Copy} variant="secondary" onPress={copyRoomCode} disabled={!roomCode} />
+            <Button label={codeCopied ? 'Copied' : 'Copy'} accessibilityLabel={codeCopied ? 'Room code copied' : 'Copy room code'} icon={codeCopied ? Check : Copy} variant="secondary" onPress={copyRoomCode} disabled={!roomCode} />
           </View>
           <StatusIndicator status={connectionStatus} label={connectionStatus === 'connected' ? 'Connected' : status} />
         </View>
@@ -687,7 +687,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
             <AppText variant="label">Video quality</AppText>
             {qualityLocked && <AppText variant="caption" tone="textSecondary">Stop camera to change</AppText>}
           </View>
-          <View style={styles.qualityOptions}>
+          <View style={styles.qualityOptions} accessibilityRole="radiogroup" accessibilityLabel="Video quality">
             {(['low', 'balanced', 'high'] as const).map((quality) => {
               const preset = VIDEO_QUALITY_PRESETS[quality];
               const selected = videoQuality === quality;

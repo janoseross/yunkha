@@ -5,12 +5,18 @@
     "scheme": "yunkha",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/yunkha-icon.png",
     "userInterfaceStyle": "dark",
     "plugins": [
       "@config-plugins/react-native-webrtc",
       "expo-font",
-      ["expo-splash-screen", { "backgroundColor": "#16211A" }]
+      ["expo-splash-screen", {
+        "backgroundColor": "#16211A",
+        "image": "./assets/yunkha-splash.png",
+        "imageWidth": 260,
+        "resizeMode": "contain",
+        "android": { "image": "./assets/yunkha-adaptive-foreground.png" }
+      }]
     ],
     "ios": {
       "supportsTablet": true,
@@ -25,10 +31,8 @@
         "android.permission.RECORD_AUDIO"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#16211A",
+        "foregroundImage": "./assets/yunkha-adaptive-foreground.png"
       },
       "predictiveBackGestureEnabled": false
     },

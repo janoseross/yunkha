@@ -175,7 +175,7 @@ export function StatusIndicator({ status, label }: { status: ConnectionStatus; l
   const detail = statusDetails[status];
   const text = label ?? detail.label;
   return (
-    <View accessibilityLabel={text} accessibilityRole="text" style={{ flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.x2, alignSelf: 'flex-start' }}>
+    <View accessible accessibilityLabel={text} accessibilityRole="text" accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.x2, alignSelf: 'flex-start' }}>
       <View style={{ width: tokens.spacing.x2, height: tokens.spacing.x2, borderRadius: tokens.radii.pill, backgroundColor: colors[detail.color] }} />
       <AppText variant="caption" tone="textSecondary">{text}</AppText>
     </View>
