@@ -119,6 +119,18 @@ test('rooms isolate signaling and clean up when peers leave', async () => {
     monitorA.send({ type: 'answer', callId: 'a3', sdp: { type: 'answer', sdp: 'rejoined-answer' } });
     assert.equal((await cameraA.next('answer')).callId, 'a3');
 
+    monitorA.send({ type: 'leave-room' });
+    await cameraA.next('peer-left');
+    await cameraA.next('waiting');
+    monitorA.send({ type: 'join-room', code: codeA });
+    assert.equal((await monitorA.next('room-joined')).code, codeA);
+    await monitorA.next('ready');
+    await cameraA.next('ready');
+    cameraA.send({ type: 'offer', callId: 'a4', sdp: { type: 'offer', sdp: 'third-call-same-room' } });
+    assert.equal((await monitorA.next('offer')).callId, 'a4');
+    monitorA.send({ type: 'answer', callId: 'a4', sdp: { type: 'answer', sdp: 'third-answer' } });
+    assert.equal((await cameraA.next('answer')).callId, 'a4');
+
     cameraA.socket.close();
     assert.equal((await monitorA.next('room-ended')).code, codeA);
     monitorA.send({ type: 'join-room', code: codeA });

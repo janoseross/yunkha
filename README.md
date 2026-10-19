@@ -19,7 +19,7 @@ WebRTC requires a development build; Expo Go does not include its native module.
 
 ## Room signaling milestone
 
-The signaling server keeps rooms in memory. Room codes are four uppercase letters from `ABCDEFGHJKLMNPQRSTUVWXYZ`. A Camera sends `{ "type": "create-room" }` and receives `{ "type": "room-created", "code": "ABCD" }`. A Monitor sends `{ "type": "join-room", "code": "ABCD" }` and receives `{ "type": "room-joined", "code": "ABCD" }`. Either side can send `{ "type": "leave-room" }`. The existing `ready`, `waiting`, `peer-left`, and WebRTC call messages apply within that room. Room errors use `{ "type": "room-error", "reason": "..." }`; a Monitor receives `{ "type": "room-ended", "code": "ABCD" }` when its Camera leaves. The native Monitor remembers the last successfully joined code but joins only when Connect is tapped.
+The signaling server keeps rooms in memory. Room codes are four uppercase letters from `ABCDEFGHJKLMNPQRSTUVWXYZ`. A Camera sends `{ "type": "create-room" }` and receives `{ "type": "room-created", "code": "ABCD" }`. A Monitor sends `{ "type": "join-room", "code": "ABCD" }` and receives `{ "type": "room-joined", "code": "ABCD" }`. Either side can send `{ "type": "leave-room" }`. The existing `ready`, `waiting`, `peer-left`, and WebRTC call messages apply within that room. Room errors use `{ "type": "room-error", "reason": "..." }`; a Monitor receives `{ "type": "room-ended", "code": "ABCD" }` when its Camera leaves. The native Monitor shows the last successfully joined code as a recent room but joins only when the user taps Join or Rejoin.
 
 ## Design system (Day 1)
 

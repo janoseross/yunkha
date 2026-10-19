@@ -21,7 +21,7 @@ import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import Square from 'lucide-react-native/icons/square';
 import {
   MediaStream, mediaDevices, RTCIceCandidate, RTCPeerConnection,
-  RTCSessionDescription, RTCView,
+  RTCSessionDescription, RTCView, permissions,
 } from 'react-native-webrtc';
 
 import { signalingUrl } from './devConfig';
@@ -115,12 +115,14 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const [status, setStatus] = useState(signalingUrl ? (role === 'sender' ? 'Connecting to signaling server…' : 'Enter a room code') : 'Signaling not configured');
   const [error, setError] = useState<string | null>(null);
   const [roomInput, setRoomInput] = useState('');
+  const [recentRoom, setRecentRoom] = useState<string | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [showLocalPreview, setShowLocalPreview] = useState(true);
   const [videoQuality, setVideoQuality] = useState<VideoQuality>('balanced');
   const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
+  const [isChangingQuality, setIsChangingQuality] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [isRoomInputFocused, setIsRoomInputFocused] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
@@ -129,7 +131,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const socketRef = useRef<WebSocket | null>(null);
   const roomCodeRef = useRef<string | null>(null);
   const pendingJoinRef = useRef<string | null>(null);
-  const roomInputEdited = useRef(false);
+  const recentRoomUpdatedRef = useRef(false);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
@@ -140,6 +142,9 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const peerReadyRef = useRef(false);
   const startRequest = useRef(0);
   const startingRef = useRef(false);
+  const cameraOperationRef = useRef(false);
+  const permissionRequestRef = useRef(false);
+  const resumeCaptureRef = useRef<(() => void) | null>(null);
   const mounted = useRef(false);
   const sessionScrollRef = useRef<ScrollView>(null);
 
@@ -179,9 +184,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     if (role !== 'receiver') return;
     let active = true;
     void AsyncStorage.getItem(LAST_MONITOR_ROOM_KEY).then((savedCode) => {
-      if (active && !roomInputEdited.current && savedCode && ROOM_CODE_PATTERN.test(savedCode)) {
-        setRoomInput(savedCode);
-      }
+      if (active && !recentRoomUpdatedRef.current && savedCode && ROOM_CODE_PATTERN.test(savedCode)) setRecentRoom(savedCode);
     }).catch(() => {});
     return () => { active = false; };
   }, [role]);
@@ -192,8 +195,9 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     }
   }, []);
 
-  const connectMonitor = () => {
-    const code = roomInput.trim().toUpperCase();
+  const connectMonitor = (submittedCode: string) => {
+    if (isJoining || pendingJoinRef.current || roomCodeRef.current) return;
+    const code = submittedCode.trim().toUpperCase();
     if (!ROOM_CODE_PATTERN.test(code)) {
       setError('Enter a valid 4-letter room code.');
       return;
@@ -216,7 +220,12 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     pendingCandidates.current = [];
     const oldPeer = peerRef.current;
     peerRef.current = null;
-    oldPeer?.close();
+    if (oldPeer) {
+      oldPeer.onicecandidate = null;
+      oldPeer.ontrack = null;
+      oldPeer.onconnectionstatechange = null;
+      oldPeer.close();
+    }
     pendingLocalCandidates.current = [];
     offerSent.current = false;
     if (remoteStreamRef.current) {
@@ -225,6 +234,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     }
     if (stopCapture) {
       startRequest.current += 1;
+      resumeCaptureRef.current?.();
       if (localStreamRef.current) {
         releaseStream(localStreamRef.current);
         localStreamRef.current = null;
@@ -233,9 +243,13 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     if (mounted.current) {
       setRemoteStream(null);
       if (stopCapture) setLocalStream(null);
-      setStatus(peerReadyRef.current ? 'Peer ready' : 'Waiting for peer');
+      setStatus(peerReadyRef.current
+        ? role === 'sender'
+          ? localStreamRef.current ? 'Waiting for video connection' : 'Waiting for camera to start'
+          : 'Waiting for Camera video'
+        : role === 'sender' ? 'Waiting for Monitor' : 'Waiting for Camera');
     }
-  }, [send]);
+  }, [role, send]);
 
   const createPeer = useCallback((callId: string) => {
     const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
@@ -256,6 +270,11 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     };
     peer.onconnectionstatechange = () => {
       if (peerRef.current !== peer || !mounted.current) return;
+      if (peer.connectionState === 'failed') {
+        stopCall(role !== 'sender', true);
+        setStatus('Video connection failed');
+        return;
+      }
       setStatus(`WebRTC: ${peer.connectionState}`);
       if (peer.connectionState === 'connected') {
         void peer.getStats().then((stats) => {
@@ -270,18 +289,19 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
       }
     };
     return peer;
-  }, [role, send]);
+  }, [role, send, stopCall]);
 
   const offer = useCallback(async (stream: MediaStream) => {
     if (!peerReadyRef.current || peerRef.current) return;
     const callId = `${Date.now()}-${Math.random()}`;
     const peer = createPeer(callId);
+    const isCurrentCall = () => peerRef.current === peer && callIdRef.current === callId;
     try {
       peer.addTrack(stream.getVideoTracks()[0], stream);
       const description = await peer.createOffer();
-      if (callIdRef.current !== callId) return;
+      if (!isCurrentCall()) return;
       await peer.setLocalDescription(description);
-      if (callIdRef.current !== callId) return;
+      if (!isCurrentCall()) return;
       send({ type: 'offer', callId, sdp: description });
       offerSent.current = true;
       for (const candidate of pendingLocalCandidates.current) {
@@ -292,13 +312,13 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     } catch (cause) {
       if (peerRef.current === peer) {
         setError(cause instanceof Error ? cause.message : 'Could not create offer');
-        stopCall(true, true);
+        stopCall(false, true);
       }
     }
   }, [createPeer, send, stopCall]);
 
   const startCamera = useCallback(async () => {
-    if (role !== 'sender' || startingRef.current || localStreamRef.current) return;
+    if (role !== 'sender' || startingRef.current || cameraOperationRef.current || localStreamRef.current) return;
     startingRef.current = true;
     setIsStarting(true);
     setError(null);
@@ -306,6 +326,37 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     const request = ++startRequest.current;
     const preset = VIDEO_QUALITY_PRESETS[videoQuality];
     try {
+      permissionRequestRef.current = true;
+      let granted: boolean;
+      try {
+        granted = await permissions.request({ name: 'camera' });
+      } finally {
+        permissionRequestRef.current = false;
+      }
+      if (!mounted.current || request !== startRequest.current) return;
+      if (!granted) {
+        setError('Camera permission denied. Allow camera access in device settings and try again.');
+        setStatus('Camera permission denied');
+        return;
+      }
+      if (AppState.currentState !== 'active') {
+        await new Promise<void>((resolve) => {
+          let completed = false;
+          const subscription = AppState.addEventListener('change', (state) => {
+            if (state === 'active') finish();
+          });
+          const finish = () => {
+            if (completed) return;
+            completed = true;
+            subscription.remove();
+            resumeCaptureRef.current = null;
+            resolve();
+          };
+          resumeCaptureRef.current = finish;
+          if (AppState.currentState === 'active') finish();
+        });
+      }
+      if (!mounted.current || request !== startRequest.current) return;
       const stream = await mediaDevices.getUserMedia({
         audio: false,
         video: {
@@ -327,7 +378,10 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
       else setStatus('Camera ready; waiting for Monitor');
     } catch (cause) {
       if (mounted.current && request === startRequest.current) {
-        setError(cause instanceof Error ? cause.message : 'Could not start the camera');
+        const message = cause instanceof Error ? cause.message : 'Could not start the camera';
+        setError(/permission|notallowed|security/i.test(message)
+          ? 'Camera permission denied. Allow camera access in device settings and try again.'
+          : message);
         setStatus('Camera failed');
       }
     } finally {
@@ -336,14 +390,53 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     }
   }, [cameraFacing, offer, role, videoQuality]);
 
+  const changeVideoQuality = async (quality: VideoQuality) => {
+    if (quality === videoQuality || startingRef.current || cameraOperationRef.current) return;
+    const stream = localStreamRef.current;
+    if (!stream) {
+      setVideoQuality(quality);
+      return;
+    }
+    const track = stream.getVideoTracks()[0];
+    if (!track || track.readyState !== 'live') {
+      setError('Camera capture stopped. Stop and restart the camera.');
+      return;
+    }
+    cameraOperationRef.current = true;
+    setIsChangingQuality(true);
+    setError(null);
+    const request = startRequest.current;
+    const facingMode = track.getSettings().facingMode ?? cameraFacing;
+    const previous = VIDEO_QUALITY_PRESETS[videoQuality];
+    const selected = VIDEO_QUALITY_PRESETS[quality];
+    const stillCapturing = () => mounted.current && request === startRequest.current && localStreamRef.current === stream;
+    try {
+      await track.applyConstraints({ facingMode, width: selected.width, height: selected.height, frameRate: selected.frameRate });
+      if (stillCapturing()) setVideoQuality(quality);
+    } catch {
+      if (stillCapturing()) {
+        try {
+          await track.applyConstraints({ facingMode, width: previous.width, height: previous.height, frameRate: previous.frameRate });
+          if (stillCapturing()) setError('Could not change video quality. The previous quality was restored.');
+        } catch {
+          if (stillCapturing()) setError('Could not restore video quality. Stop and restart the camera.');
+        }
+      }
+    } finally {
+      cameraOperationRef.current = false;
+      if (mounted.current) setIsChangingQuality(false);
+    }
+  };
+
   const switchCamera = async () => {
-    if (role !== 'sender' || isStarting || isSwitchingCamera) return;
+    if (role !== 'sender' || isStarting || cameraOperationRef.current) return;
     const nextFacing = cameraFacing === 'environment' ? 'user' : 'environment';
     const stream = localStreamRef.current;
     if (!stream) {
       setCameraFacing(nextFacing);
       return;
     }
+    cameraOperationRef.current = true;
     setIsSwitchingCamera(true);
     try {
       const preset = VIDEO_QUALITY_PRESETS[videoQuality];
@@ -360,6 +453,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     } catch {
       if (localStreamRef.current === stream) setError('Could not switch camera.');
     } finally {
+      cameraOperationRef.current = false;
       if (mounted.current) setIsSwitchingCamera(false);
     }
   };
@@ -381,7 +475,9 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
           pendingJoinRef.current = null;
           roomCodeRef.current = message.code;
           setRoomCode(message.code);
-          setRoomInput(message.code);
+          setRoomInput('');
+          recentRoomUpdatedRef.current = true;
+          setRecentRoom(message.code);
           void AsyncStorage.setItem(LAST_MONITOR_ROOM_KEY, message.code).catch(() => {
             if (mounted.current) setError('Could not save the room code.');
           });
@@ -409,19 +505,25 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
           roomCodeRef.current = null;
           peerReadyRef.current = false;
           setRoomCode(null);
-          setRoomInput(message.code);
+          setRoomInput('');
           setError(null);
           stopCall(true, false);
           setStatus('Camera ended the room');
           break;
         case 'waiting':
           peerReadyRef.current = false;
+          if (peerRef.current) stopCall(role !== 'sender', false);
           setStatus(role === 'sender' ? 'Waiting for Monitor' : 'Waiting for Camera');
           break;
         case 'ready':
           if (!roomCodeRef.current) break;
+          // A new room peer always starts a new call, even if the previous one failed to close cleanly.
+          if (peerRef.current) stopCall(role !== 'sender', false);
           peerReadyRef.current = true;
-          setStatus('Peer ready');
+          setError(null);
+          setStatus(role === 'sender'
+            ? localStreamRef.current ? 'Connecting video…' : 'Waiting for camera to start'
+            : 'Waiting for Camera video');
           if (role === 'sender' && localStreamRef.current) await offer(localStreamRef.current);
           break;
         case 'peer-left':
@@ -470,7 +572,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     } catch (cause) {
       if (!mounted.current || ('callId' in message && message.callId !== callIdRef.current)) return;
       setError(cause instanceof Error ? cause.message : 'Signaling failed');
-      stopCall(true, true);
+      stopCall(role !== 'sender', true);
     }
   }, [createPeer, offer, role, send, stopCall]);
 
@@ -510,7 +612,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
     };
     socket.onerror = () => setError('Could not reach the signaling server');
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') stopCall(true, true);
+      if (state !== 'active' && !permissionRequestRef.current) stopCall(true, true);
     });
     return () => {
       mounted.current = false;
@@ -532,7 +634,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
   const preview = role === 'sender' ? localStream : remoteStream;
   const isEditingRoom = role === 'receiver' && !roomCode && (isRoomInputFocused || isKeyboardVisible);
   const cameraPreviewMinHeight = Math.max(0, Math.min(windowWidth, tokens.layout.contentMaxWidth) - 2 * tokens.layout.screenPadding) / VIDEO_FRAME_ASPECT_RATIO;
-  const qualityLocked = isStarting || !!localStream;
+  const qualityLocked = isStarting || isSwitchingCamera || isChangingQuality;
   const copyRoomCode = () => {
     if (!roomCode) return;
     Clipboard.setString(roomCode);
@@ -643,33 +745,49 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
         <Card style={styles.joinCard}>
           <AppText variant="title">Join a room</AppText>
           {(isJoining || status !== 'Enter a room code') && <StatusIndicator status={connectionStatus} label={status} />}
-          <AppTextInput
-            label="Room code"
-            accessibilityLabel="Four-letter room code"
-            error={error || (!signalingUrl ? 'Set EXPO_PUBLIC_SIGNALING_URL to the signaling WebSocket URL.' : undefined)}
-            style={styles.roomInput}
-            value={roomInput}
-            onChangeText={(value) => {
-              roomInputEdited.current = true;
-              setRoomInput(value.toUpperCase().replace(/[^ABCDEFGHJKLMNPQRSTUVWXYZ]/g, '').slice(0, 4));
-              setError(null);
-            }}
-            onFocus={() => setIsRoomInputFocused(true)}
-            onBlur={() => setIsRoomInputFocused(false)}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            keyboardType="default"
-            maxLength={4}
-            multiline={false}
-            scrollEnabled={false}
-            numberOfLines={1}
-            textAlignVertical="center"
-            placeholder="ABCD"
-            returnKeyType="done"
-            onSubmitEditing={connectMonitor}
-            editable={!isJoining}
-          />
-          <Button label="Join room" icon={Play} onPress={connectMonitor} loading={isJoining} disabled={roomInput.length !== 4 || !signalingUrl} fullWidth />
+          <View style={styles.joinRow}>
+            <View style={styles.roomInputWrap}>
+              <AppTextInput
+                accessibilityLabel="Four-letter room code"
+                style={styles.roomInput}
+                value={roomInput}
+                onChangeText={(value) => {
+                  setRoomInput(value.toUpperCase().replace(/[^ABCDEFGHJKLMNPQRSTUVWXYZ]/g, '').slice(0, 4));
+                  setError(null);
+                }}
+                onFocus={() => setIsRoomInputFocused(true)}
+                onBlur={() => setIsRoomInputFocused(false)}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                keyboardType="default"
+                maxLength={4}
+                multiline={false}
+                scrollEnabled={false}
+                numberOfLines={1}
+                textAlignVertical="center"
+                placeholder="ABCD"
+                returnKeyType="done"
+                onSubmitEditing={() => connectMonitor(roomInput)}
+                editable={!isJoining}
+              />
+            </View>
+            <Button label="Join" onPress={() => connectMonitor(roomInput)} loading={isJoining} disabled={roomInput.length !== 4 || !signalingUrl} style={styles.roomActionButton} />
+          </View>
+          {(error || !signalingUrl) && (
+            <AppText variant="caption" tone="error" accessibilityRole="alert">
+              {error || 'Set EXPO_PUBLIC_SIGNALING_URL to the signaling WebSocket URL.'}
+            </AppText>
+          )}
+          {recentRoom && !isEditingRoom && (
+            <View style={styles.recentSection}>
+              <View style={styles.recentDivider} />
+              <AppText variant="metadata" tone="textSecondary">RECENT ROOM</AppText>
+              <View style={styles.recentRow}>
+                <AppText variant="title" style={styles.recentCode}>{recentRoom}</AppText>
+                <Button label="Rejoin" variant="secondary" onPress={() => connectMonitor(recentRoom)} disabled={isJoining || !signalingUrl} style={styles.roomActionButton} />
+              </View>
+            </View>
+          )}
         </Card>
       )}
 
@@ -685,7 +803,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
         <View style={styles.settingsSection}>
           <View style={styles.settingsHeading}>
             <AppText variant="label">Video quality</AppText>
-            {qualityLocked && <AppText variant="caption" tone="textSecondary">Stop camera to change</AppText>}
+            {qualityLocked && <AppText variant="caption" tone="textSecondary">{isChangingQuality ? 'Changing quality…' : 'Camera busy'}</AppText>}
           </View>
           <View style={styles.qualityOptions} accessibilityRole="radiogroup" accessibilityLabel="Video quality">
             {(['low', 'balanced', 'high'] as const).map((quality) => {
@@ -699,7 +817,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
                   accessibilityState={{ checked: selected, disabled: qualityLocked }}
                   disabled={qualityLocked}
                   onPress={() => {
-                    if (!startingRef.current && !localStreamRef.current) setVideoQuality(quality);
+                    void changeVideoQuality(quality);
                   }}
                   style={({ pressed }) => [styles.qualityOption, selected && styles.qualityOptionSelected, pressed && !qualityLocked && styles.qualityOptionPressed, qualityLocked && styles.qualityOptionDisabled]}
                 >
@@ -718,6 +836,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
           variant={localStream ? 'destructive' : 'primary'}
           onPress={localStream ? () => stopCall(true, true) : startCamera}
           loading={isStarting}
+          disabled={isChangingQuality || isSwitchingCamera}
           fullWidth
         />
       )}
@@ -729,7 +848,7 @@ function Session({ role, onLeave }: { role: Role; onLeave: () => void }) {
             icon={RefreshCw}
             variant="secondary"
             onPress={switchCamera}
-            disabled={isStarting || isSwitchingCamera}
+            disabled={isStarting || isSwitchingCamera || isChangingQuality}
             style={styles.utilityButton}
           />
           {!!localStream && (
@@ -783,6 +902,9 @@ const styles = StyleSheet.create({
   roomInfoTop: { flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.x2 },
   roomCode: { flex: 1, minWidth: 0, letterSpacing: tokens.spacing.x1, color: colors.text },
   joinCard: { gap: tokens.spacing.x2 },
+  joinRow: { flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.x4 },
+  roomInputWrap: { flex: 1, minWidth: 0 },
+  roomActionButton: { width: tokens.layout.touchTarget * 2, paddingHorizontal: tokens.spacing.x2 },
   roomInput: {
     height: tokens.layout.inputMinHeight,
     minHeight: tokens.layout.inputMinHeight,
@@ -790,10 +912,14 @@ const styles = StyleSheet.create({
     fontSize: tokens.typography.heading.fontSize,
     lineHeight: tokens.typography.heading.lineHeight,
     includeFontPadding: false,
-    textAlign: 'center',
+    textAlign: 'left',
     textAlignVertical: 'center',
     letterSpacing: tokens.spacing.x2,
   },
+  recentSection: { gap: tokens.spacing.x2, paddingTop: tokens.spacing.x2 },
+  recentDivider: { height: tokens.borderWidths.hairline, backgroundColor: colors.border },
+  recentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: tokens.spacing.x2 },
+  recentCode: { flex: 1, minWidth: 0, letterSpacing: tokens.spacing.x1 },
   joinedCode: { flex: 1, letterSpacing: tokens.spacing.x1 },
   errorCard: { borderColor: colors.error },
   videoFrame: {
@@ -804,7 +930,7 @@ const styles = StyleSheet.create({
     borderWidth: tokens.borderWidths.hairline,
     borderColor: colors.border,
   },
-  videoStandard: { aspectRatio: VIDEO_FRAME_ASPECT_RATIO },
+  videoStandard: { aspectRatio: VIDEO_FRAME_ASPECT_RATIO * 1.2 },
   cameraVideo: { flexGrow: 1 },
   videoFill: { flex: 1 },
   fullscreenVideo: { borderRadius: tokens.radii.none, borderWidth: tokens.borderWidths.none },

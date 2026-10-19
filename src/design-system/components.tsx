@@ -123,7 +123,7 @@ export function Card({ children, elevated = false, style, accessibilityLabel }: 
 }
 
 type AppTextInputProps = TextInputProps & {
-  label: string;
+  label?: string;
   error?: string;
   hint?: string;
 };
@@ -134,7 +134,7 @@ export const AppTextInput = forwardRef<TextInput, AppTextInputProps>(function Ap
 
   return (
     <View style={{ gap: tokens.spacing.x2 }}>
-      <AppText variant="label" tone={editable ? 'text' : 'textSecondary'}>{label}</AppText>
+      {label && <AppText variant="label" tone={editable ? 'text' : 'textSecondary'}>{label}</AppText>}
       <TextInput
         ref={ref}
         {...props}
