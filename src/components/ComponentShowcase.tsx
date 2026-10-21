@@ -4,9 +4,9 @@ import {
 import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
-import { AppText, AppTextInput, Button, Card, IconButton, StatusIndicator } from './components';
-import { colors, layout, primitives, tokens, typography } from './tokens';
-import type { TextVariant } from './tokens';
+import { AppText, AppTextInput, Button, Card, IconButton, StatusIndicator } from './index';
+import { colors, layout, primitives, tokens, typography } from '../theme/tokens';
+import type { TextVariant } from '../theme/tokens';
 
 const primitiveSwatches = Object.entries(primitives.color);
 const semanticSwatches = Object.entries(colors);
@@ -35,7 +35,7 @@ function Swatch({ name, value }: { name: string; value: string }) {
   );
 }
 
-export default function DesignSystemShowcase({ onClose }: { onClose: () => void }) {
+export default function ComponentShowcase({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('Studio camera');
   const [empty, setEmpty] = useState('');
   const [focused, setFocused] = useState('');

@@ -6,8 +6,8 @@ import Camera from 'lucide-react-native/icons/camera';
 import MonitorPlay from 'lucide-react-native/icons/monitor-play';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { AppText, Card } from '../design-system/components';
-import { colors, tokens } from '../design-system/tokens';
+import { AppText, Card } from '../components';
+import { colors, tokens } from '../theme/tokens';
 
 type RoleCardProps = {
   title: string;
